@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Procesador de Pedidos</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:1100px;margin:20px auto;padding:20px}
+textarea{width:100%;height:220px}
+button{padding:10px 16px;margin-top:10px}
+table{width:100%;border-collapse:collapse;margin-top:20px}
+th,td{border:1px solid #ccc;padding:8px;text-align:left}
+.card{border:1px solid #ddd;padding:12px;margin:10px 0}
+</style>
+</head>
+<body>
+<h1>Procesador de Pedidos</h1>
+<p>Pegá los datos copiados desde Excel:</p>
+<textarea id="entrada"></textarea><br>
+<button onclick="procesar()">Procesar</button>
+
+<div id="salida"></div>
+
+<script>
+// Pegá aquí la lógica del archivo JS
+// ===================== A. UTILIDADES =====================
+function normalizar(texto) {
+  return String(texto == null ? '' : texto)
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function aNumero(valorCelda) {
+  if (valorCelda === null || valorCelda === undefined || valorCelda === '') return { valor: 0, esValido: true };
+  if (typeof valorCelda === 'number') return { valor: valorCelda, esValido: !isNaN(valorCelda) };
+  let texto = String(valorCelda).trim();
+  if (texto === '') return { valor: 0, esValido: true };
+  texto = texto.replace(/[^0-9,.\-]/g, '');
+  if (texto === '') return { valor: 0, esValido: false };
+  if (texto.includes(',') && texto.includes('.')) {
+    if (texto.lastIndexOf(',') > texto.lastIndexOf('.')) texto = texto.replace(/\./g, '').replace(',', '.');
+    else texto = texto.replace(/,/g, '');
+  } else if (texto.includes(',')) {
+    texto = texto.replace(',', '.');
+  }
+  const numero = parseFloat(texto);
+  return { valor: isNaN(numero) ? 0 : numero, esValido: !isNaN(numero) };
+}
+
+function formatearFecha(texto) {
+  const t = String(texto || '').trim();
+  const m = t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (!m) return t;
+  let [, d, mes, anio] = m;
+  if (anio.length === 2) anio = '20' + anio;
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const idx = parseInt(mes, 10) - 1;
+  if (idx < 0 || idx > 11) return t;
+  return `${parseInt(d,10)} ${meses[idx]} ${anio}`;
+}
+
+// ===================== B. CLASIFICACIÓN DE COLUMNAS =====================
+// Importante: se revisa "total" ANTES que "pedido" porque "total_pedido"
+// contiene la palabra "pedido" pero representa una CANTIDAD, no el número
+// de pedido/orden.
+function clasificarColumna(encabezado) {
+  const norm = normalizar(encabezado);
+  if (!norm) return null;
+  if (norm.includes('talle') || norm.includes('talla') || norm.includes('size')) return 'talle';
+  if (norm.includes('modelo') || norm.includes('articulo') || norm.includes('producto') || norm.includes('sku')) return 'modelo';
+  if (norm.includes('cliente') || norm.includes('razon social')) return 'cliente';
+  if (norm.includes('fecha') || norm.includes('date')) return 'fecha';
+  if (norm.includes('disponible') || norm.includes('stock') || norm.includes('existencia')) return 'disponible';
+  if (norm.startsWith('total') || norm.includes('cantidad') || norm.includes('qty')) return 'cantidadPedida';
+  if (norm.includes('pedido') || norm.includes('orden') || norm.includes('comprobante') || norm.includes('nro') || norm.includes('numero')) return 'numeroPedido';
+  return null;
+}
+
+// ===================== C. PARSEO DE TEXTO PEGADO =====================
+function partirEnLineas(texto) {
+  return String(texto || '').split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
+}
+
+function detectarSeparador(lineas) {
+  if (lineas.some(l => l.includes('\t'))) return '\t';
+  if (lineas.some(l => l.includes(';'))) return ';';
+  // CSV con comas: solo si el conteo de columnas es consistente y > 1
+  const conteos = lineas.map(l => l.split(',').length);
+  if (lineas.some(l => l.includes(',')) && conteos.every(c => c === conteos[0]) && conteos[0] > 1) return ',';
+  return null;
+}
+
+const ORDEN_POR_DEFECTO = ['cliente', 'fecha', 'numeroPedido', 'modelo', 'talle', 'disponible', 'cantidadPedida'];
+
+function parsearDatos(textoPegado) {
+  const resultado = { ok: false, error: null, registros: [], cabecera: {}, advertencias: [], totales: null, columnasDetectadas: [], huboEncabezado: false };
+
+  const lineas = partirEnLineas(textoPegado);
+  if (lineas.length === 0) {
+    resultado.error = { tipo: 'vacio', mensaje: 'Pegá filas de datos copiadas desde Excel antes de procesar el pedido.' };
+    return resultado;
+  }
+
+  const sep = detectarSeparador(lineas);
+  if (!sep) {
+    resultado.error = {
+      tipo: 'sin-separador',
+      mensaje: 'No se detectaron columnas separadas por tabulaciones. Copiá las celdas directamente desde Excel (seleccioná el rango y Ctrl+C) y pegalas aquí con Ctrl+V.'
+    };
+    return resultado;
+  }
+
+  const filas = lineas.map(l => l.split(sep).map(c => c.trim()));
+  const primerFila = filas[0];
+  const clasifPrimerFila = primerFila.map(clasificarColumna);
+  const tiposDetectados = clasifPrimerFila.filter(Boolean);
+  const tiposUnicos = new Set(tiposDetectados);
+
+  let columnas = {};
+  let filasDatos;
+  let huboEncabezado = false;
+
+  // Se considera encabezado si al menos 3 columnas distintas fueron
+  // identificadas y entre ellas está cliente, modelo o talle (no son
+  // valores que aparezcan tipeados así por casualidad en datos reales).
+  const pareceEncabezado = tiposUnicos.size >= 3 && (tiposUnicos.has('cliente') || tiposUnicos.has('modelo') || tiposUnicos.has('talle'));
+
+  if (pareceEncabezado) {
+    huboEncabezado = true;
+    primerFila.forEach((enc, idx) => {
+      const tipo = clasificarColumna(enc);
+      if (tipo && !(tipo in columnas)) columnas[tipo] = idx;
+    });
+    filasDatos = filas.slice(1);
+  } else if (primerFila.length === ORDEN_POR_DEFECTO.length) {
+    // Sin encabezado reconocible, pero la cantidad de columnas coincide
+    // con el formato estándar: cliente, fecha, pedido, modelo, talle,
+    // disponible, total_pedido (en ese orden).
+    ORDEN_POR_DEFECTO.forEach((tipo, idx) => { columnas[tipo] = idx; });
+    filasDatos = filas;
+  } else {
+    resultado.error = {
+      tipo: 'sin-encabezado-reconocible',
+      mensaje: `No se pudieron identificar las columnas. Se esperaban ${ORDEN_POR_DEFECTO.length} columnas (cliente, fecha, pedido, modelo, talle, disponible, total_pedido) pero se detectaron ${primerFila.length}. Revisá que la primera fila pegada sea el encabezado o los datos en ese orden.`,
+      encabezadosVistos: primerFila
+    };
+    return resultado;
+  }
+
+  resultado.columnasDetectadas = Object.keys(columnas);
+  resultado.huboEncabezado = huboEncabezado;
+
+  const REQUERIDAS = ['modelo', 'talle', 'disponible', 'cantidadPedida'];
+  const faltantes = REQUERIDAS.filter(r => !(r in columnas));
+  if (faltantes.length > 0) {
+    const NOMBRES = { modelo: 'Modelo', talle: 'Talle', disponible: 'Disponible', cantidadPedida: 'Cantidad pedida / Total pedido', cliente: 'Cliente', fecha: 'Fecha', numeroPedido: 'Número de pedido' };
+    resultado.error = {
+      tipo: 'columnas-faltantes',
+      mensaje: `Faltan columnas obligatorias: ${faltantes.map(f => NOMBRES[f]).join(', ')}.`,
+      encabezadosVistos: primerFila
+    };
+    return resultado;
+  }
+
+  // Construir registros
+  const registros = [];
+  let filasNoNumericas = 0;
+  filasDatos.forEach((fila, i) => {
+    const get = (tipo) => (tipo in columnas ? (fila[columnas[tipo]] ?? '').trim() : '');
+    const modelo = get('modelo');
+    const talle = get('talle');
+    if (!modelo && !talle) return; // fila vacía
+
+    const resPedida = aNumero(get('cantidadPedida'));
+    const resDisp = aNumero(get('disponible'));
+    if (!resPedida.esValido || !resDisp.esValido) filasNoNumericas++;
+
+    registros.push({
+      id: i,
+      cliente: get('cliente'),
+      fecha: get('fecha'),
+      numeroPedido: get('numeroPedido'),
+      modelo,
+      talle,
+      pedido: resPedida.valor,
+      disponible: resDisp.valor
+    });
+  });
+
+  if (registros.length === 0) {
+    resultado.error = { tipo: 'sin-filas', mensaje: 'No se encontraron filas de datos válidas para procesar.' };
+    return resultado;
+  }
+
+  if (filasNoNumericas > 0) {
+    resultado.advertencias.push(`${filasNoNumericas} fila(s) tenían valores no numéricos en Pedido o Disponible; se consideraron como 0.`);
+  }
+
+  // Cabecera: cliente / pedido / fecha más frecuentes (o primer valor no vacío)
+  function valorMasFrecuente(campo) {
+    const conteo = {};
+    registros.forEach(r => { if (r[campo]) conteo[r[campo]] = (conteo[campo in conteo ? r[campo] : r[campo]] || 0); });
+    const cuenta = {};
+    registros.forEach(r => { if (r[campo]) cuenta[r[campo]] = (cuenta[r[campo]] || 0) + 1; });
+    const entradas = Object.entries(cuenta).sort((a, b) => b[1] - a[1]);
+    return { valor: entradas.length ? entradas[0][0] : '', distintos: entradas.length };
+  }
+
+  const infoCliente = valorMasFrecuente('cliente');
+  const infoPedido = valorMasFrecuente('numeroPedido');
+  const infoFecha = valorMasFrecuente('fecha');
+
+  if (infoCliente.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoCliente.distintos} clientes distintos en los datos pegados; se muestran todos agregados.`);
+  if (infoPedido.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoPedido.distintos} números de pedido distintos; se muestran todos agregados.`);
+
+  resultado.cabecera = {
+    cliente: infoCliente.valor || '—',
+    numeroPedido: infoPedido.valor || '—',
+    fecha: formatearFecha(infoFecha.valor) || '—'
+  };
+
+  // Calcular estado por fila
+  registros.forEach(r => {
+    r.estado = calcularEstado(r.pedido, r.disponible);
+  });
+
+  resultado.registros = registros;
+  resultado.totales = calcularTotales(registros);
+  resultado.ok = true;
+  return resultado;
+}
+
+// ===================== D. ESTADOS Y TOTALES =====================
+function calcularEstado(pedido, disponible) {
+  if (pedido <= 0) return { clave: 'sin-pedido', label: 'Sin pedido', icono: '', faltan: 0 };
+  if (disponible >= pedido) return { clave: 'completo', label: 'Completo', icono: '✅', faltan: 0 };
+  const faltan = pedido - disponible;
+  const ratio = disponible / pedido;
+  if (ratio >= 0.5) return { clave: 'parcial', label: `Faltan ${faltan}`, icono: '⚠️', faltan };
+  return { clave: 'critico', label: `Faltan ${faltan}`, icono: '❌', faltan };
+}
+
+function calcularTotales(registros) {
+  const totalLineas = registros.length;
+  const totalSolicitado = registros.reduce((a, r) => a + r.pedido, 0);
+  const totalDisponible = registros.reduce((a, r) => a + r.disponible, 0);
+  const totalCubierto = registros.reduce((a, r) => a + Math.min(r.pedido, r.disponible), 0);
+  const cumplimiento = totalSolicitado > 0 ? (totalCubierto / totalSolicitado) * 100 : 0;
+  return { totalLineas, totalSolicitado, totalDisponible, totalCubierto, cumplimiento };
+}
+
+module.exports = { normalizar, aNumero, formatearFecha, clasificarColumna, parsearDatos, calcularEstado, calcularTotales };
+
+
+function procesar(){
+  const txt=document.getElementById('entrada').value;
+  const res=parsearDatos(txt);
+  const out=document.getElementById('salida');
+
+  if(!res.ok){
+    out.innerHTML='<div class="card"><b>Error:</b> '+res.error.mensaje+'</div>';
+    return;
+  }
+
+  let html=`
+  <div class="card">
+    <b>Cliente:</b> ${res.cabecera.cliente}<br>
+    <b>Pedido:</b> ${res.cabecera.numeroPedido}<br>
+    <b>Fecha:</b> ${res.cabecera.fecha}<br>
+    <b>Cumplimiento:</b> ${res.totales.cumplimiento.toFixed(2)}%
+  </div>
+  <table>
+  <tr>
+    <th>Modelo</th><th>Talle</th><th>Pedido</th>
+    <th>Disponible</th><th>Estado</th>
+  </tr>`;
+
+  res.registros.forEach(r=>{
+    html += `<tr>
+      <td>${r.modelo}</td>
+      <td>${r.talle}</td>
+      <td>${r.pedido}</td>
+      <td>${r.disponible}</td>
+      <td>${r.estado.icono} ${r.estado.label}</td>
+    </tr>`;
+  });
+
+  html += "</table>";
+  out.innerHTML=html;
+}
+</script>
+</body>
+</html>
