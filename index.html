@@ -18,6 +18,8 @@ th,td{border:1px solid #ccc;padding:8px;text-align:left}
 <p>Pegá los datos copiados desde Excel:</p>
 <textarea id="entrada"></textarea><br>
 <button onclick="procesar()">Procesar</button>
+<button onclick="exportarExcel()">Exportar Excel</button>
+<button onclick="borrarHistorial()">Borrar Historial</button>
 
 <div id="salida"></div>
 
@@ -253,9 +255,13 @@ function calcularTotales(registros) {
 module.exports = { normalizar, aNumero, formatearFecha, clasificarColumna, parsearDatos, calcularEstado, calcularTotales };
 
 
+let ultimoResultado = null;
+let historial = JSON.parse(localStorage.getItem('historialPedidos') || '[]');
+
 function procesar(){
   const txt=document.getElementById('entrada').value;
   const res=parsearDatos(txt);
+  ultimoResultado = res;
   const out=document.getElementById('salida');
 
   if(!res.ok){
@@ -287,7 +293,54 @@ function procesar(){
   });
 
   html += "</table>";
+  historial.push({
+    fechaProceso: new Date().toLocaleString(),
+    cabecera: res.cabecera,
+    totales: res.totales,
+    registros: res.registros
+  });
+
+  localStorage.setItem('historialPedidos', JSON.stringify(historial));
+
   out.innerHTML=html;
+}
+
+function exportarExcel() {
+
+  if (!ultimoResultado || !ultimoResultado.ok) {
+    alert("Primero procesá un pedido.");
+    return;
+  }
+
+  let contenido = "Modelo\tTalle\tPedido\tDisponible\tEstado\n";
+
+  ultimoResultado.registros.forEach(r => {
+    contenido += `${r.modelo}\t${r.talle}\t${r.pedido}\t${r.disponible}\t${r.estado.label}\n`;
+  });
+
+  const blob = new Blob([contenido], {
+    type: "application/vnd.ms-excel;charset=utf-8;"
+  });
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `reporte_pedido_${Date.now()}.xls`;
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function borrarHistorial() {
+
+  if (!confirm("¿Deseás borrar todo el historial guardado?")) {
+    return;
+  }
+
+  historial = [];
+  localStorage.removeItem('historialPedidos');
+
+  alert("Historial eliminado correctamente.");
 }
 </script>
 </body>
