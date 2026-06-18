@@ -231,6 +231,8 @@
     background: var(--panel);
   }
 
+  thead th.num{ text-align:center; }
+
   tbody td{
     padding: 11px 14px;
     border-bottom: 1px solid var(--linea);
@@ -239,7 +241,7 @@
   tbody tr:last-child td{ border-bottom:none; }
   tbody tr:hover{ background: #faf8f2; }
 
-  td.num{ font-family: var(--mono); text-align:right; }
+  td.num{ font-family: var(--mono); text-align:center; }
 
   .pill{
     display:inline-flex;
@@ -627,7 +629,7 @@ function procesar(){
   </div>
   <table>
   <thead><tr>
-    <th>Modelo</th><th>Talle</th><th>Pedido</th><th>Disponible</th><th>Estado</th>
+    <th>Modelo</th><th>Talle</th><th>N° Pedido</th><th class="num">Cant. pedida</th><th class="num">Disponible</th><th>Estado</th>
   </tr></thead>
   <tbody>`;
 
@@ -635,7 +637,8 @@ function procesar(){
     html += `<tr>
       <td data-col="Modelo">${escaparHTML(r.modelo)}</td>
       <td data-col="Talle">${escaparHTML(r.talle)}</td>
-      <td data-col="Pedido" class="num">${r.pedido}</td>
+      <td data-col="N° Pedido">${escaparHTML(r.numeroPedido || '—')}</td>
+      <td data-col="Cant. pedida" class="num">${r.pedido}</td>
       <td data-col="Disponible" class="num">${r.disponible}</td>
       <td data-col="Estado"><span class="pill ${r.estado.clave}">${r.estado.icono ? r.estado.icono + ' ' : ''}${escaparHTML(r.estado.label)}</span></td>
     </tr>`;
@@ -660,13 +663,14 @@ function exportarExcel(){
   const filas = res.registros.map(r => ({
     'Modelo': r.modelo,
     'Talle': r.talle,
-    'Pedido': r.pedido,
+    'N° Pedido': r.numeroPedido,
+    'Cant. pedida': r.pedido,
     'Disponible': r.disponible,
     'Estado': r.estado.label
   }));
 
   const hoja = XLSX.utils.json_to_sheet(filas);
-  hoja['!cols'] = [{wch:18},{wch:10},{wch:10},{wch:12},{wch:16}];
+  hoja['!cols'] = [{wch:18},{wch:10},{wch:12},{wch:12},{wch:12},{wch:16}];
 
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, 'Pedido');
