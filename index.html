@@ -4,27 +4,299 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Procesador de Pedidos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-body{font-family:Arial,sans-serif;max-width:1100px;margin:20px auto;padding:20px}
-textarea{width:100%;height:220px}
-button{padding:10px 16px;margin-top:10px}
-table{width:100%;border-collapse:collapse;margin-top:20px}
-th,td{border:1px solid #ccc;padding:8px;text-align:left}
-.card{border:1px solid #ddd;padding:12px;margin:10px 0}
+  :root{
+    --tinta:        #1c2b2e;
+    --tinta-suave:  #4d5e61;
+    --hueso:        #f6f3ec;
+    --panel:        #ffffff;
+    --linea:        #dcd6c8;
+    --acento:       #c4622d;
+    --acento-suave: #f0e4d8;
+    --ok:           #2f7d5e;
+    --ok-bg:        #e7f3ec;
+    --alerta:       #b8862a;
+    --alerta-bg:    #faf0db;
+    --critico:      #b3402f;
+    --critico-bg:   #fbe9e4;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  *{box-sizing:border-box;}
+
+  body{
+    font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+    background: var(--hueso);
+    color: var(--tinta);
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    line-height: 1.5;
+  }
+
+  header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom: 2px solid var(--tinta);
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  h1{
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  .etiqueta-sistema{
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--tinta-suave);
+  }
+
+  .panel-entrada{
+    background: var(--panel);
+    border: 1px solid var(--linea);
+    border-radius: 4px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .panel-entrada label{
+    display:block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .panel-entrada .ayuda{
+    font-size: 0.8rem;
+    color: var(--tinta-suave);
+    margin: -4px 0 12px;
+  }
+
+  textarea{
+    width:100%;
+    height:200px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    border: 1px solid var(--linea);
+    border-radius: 3px;
+    padding: 12px;
+    resize: vertical;
+    background: #fdfcf9;
+    color: var(--tinta);
+  }
+
+  textarea:focus{
+    outline: 2px solid var(--acento);
+    outline-offset: 1px;
+  }
+
+  .acciones{
+    display:flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  button{
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 10px 18px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background-color .15s ease, border-color .15s ease;
+  }
+
+  button:focus-visible{
+    outline: 2px solid var(--acento);
+    outline-offset: 2px;
+  }
+
+  .btn-primario{
+    background: var(--tinta);
+    color: var(--hueso);
+  }
+  .btn-primario:hover{ background:#0f1a1c; }
+
+  .btn-secundario{
+    background: var(--panel);
+    color: var(--tinta);
+    border-color: var(--linea);
+  }
+  .btn-secundario:hover{ border-color: var(--tinta-suave); }
+
+  .btn-exportar{
+    background: var(--ok-bg);
+    color: var(--ok);
+    border-color: #bcded0;
+  }
+  .btn-exportar:hover{ background:#d9ecdf; }
+  .btn-exportar:disabled{
+    opacity: .45;
+    cursor: not-allowed;
+  }
+
+  .btn-limpiar{
+    background: transparent;
+    color: var(--critico);
+    border-color: #e3c6bd;
+  }
+  .btn-limpiar:hover{ background: var(--critico-bg); }
+
+  #salida{ margin-top: 28px; }
+
+  .card-error{
+    background: var(--critico-bg);
+    border: 1px solid #e3b9ac;
+    color: #7a2a1c;
+    border-radius: 4px;
+    padding: 16px;
+    font-size: 0.9rem;
+  }
+  .card-error b{ display:block; font-size:0.78rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+
+  .card-advertencias{
+    background: var(--alerta-bg);
+    border: 1px solid #e6d2a0;
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    font-size: 0.82rem;
+    color: #6e5117;
+  }
+  .card-advertencias ul{ margin: 4px 0 0 18px; padding:0; }
+
+  .resumen{
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--linea);
+    border: 1px solid var(--linea);
+    border-radius: 4px;
+    overflow:hidden;
+    margin-bottom: 22px;
+  }
+
+  .resumen .item{
+    background: var(--panel);
+    padding: 16px 18px;
+  }
+
+  .resumen .item .etq{
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--tinta-suave);
+    margin-bottom: 6px;
+  }
+
+  .resumen .item .val{
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  .resumen .item.cumplimiento .val{ color: var(--acento); }
+
+  table{
+    width:100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--linea);
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 0.88rem;
+  }
+
+  thead th{
+    text-align:left;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--tinta-suave);
+    font-weight: 600;
+    padding: 12px 14px;
+    border-bottom: 2px solid var(--tinta);
+    background: var(--panel);
+  }
+
+  tbody td{
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--linea);
+  }
+
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr:hover{ background: #faf8f2; }
+
+  td.num{ font-family: var(--mono); text-align:right; }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill.completo{ background: var(--ok-bg); color: var(--ok); }
+  .pill.parcial{ background: var(--alerta-bg); color: var(--alerta); }
+  .pill.critico{ background: var(--critico-bg); color: var(--critico); }
+  .pill.sin-pedido{ background:#eee; color:#777; }
+
+  .vacio{
+    text-align:center;
+    color: var(--tinta-suave);
+    font-size: 0.88rem;
+    padding: 40px 20px;
+    border: 1px dashed var(--linea);
+    border-radius: 4px;
+  }
+
+  @media (max-width: 640px){
+    .resumen{ grid-template-columns: repeat(2,1fr); }
+    table, thead, tbody, th, td, tr{ display:block; }
+    thead{ display:none; }
+    tbody tr{ border-bottom: 2px solid var(--linea); padding: 10px 0; }
+    tbody td{ border-bottom:none; display:flex; justify-content:space-between; gap:10px; padding:4px 14px; }
+    tbody td.num{ text-align:right; }
+    tbody td::before{ content attr(data-col); font-weight:600; color:var(--tinta-suave); }
+  }
 </style>
 </head>
 <body>
-<h1>Procesador de Pedidos</h1>
-<p>Pegá los datos copiados desde Excel:</p>
-<textarea id="entrada"></textarea><br>
-<button onclick="procesar()">Procesar</button>
-<button onclick="exportarExcel()">Exportar Excel</button>
-<button onclick="borrarHistorial()">Borrar Historial</button>
+
+<header>
+  <h1>Procesador de Pedidos</h1>
+  <span class="etiqueta-sistema">control de stock</span>
+</header>
+
+<div class="panel-entrada">
+  <label for="entrada">Datos pegados desde Excel</label>
+  <p class="ayuda">Seleccioná el rango en Excel, copiá (Ctrl+C) y pegá aquí (Ctrl+V).</p>
+  <textarea id="entrada" placeholder="Cliente&#9;Fecha&#9;Pedido&#9;Modelo&#9;Talle&#9;Disponible&#9;Total_pedido"></textarea>
+  <div class="acciones">
+    <button class="btn-primario" onclick="procesar()">Procesar pedido</button>
+    <button class="btn-exportar" id="btnExportar" onclick="exportarExcel()" disabled>Exportar a Excel</button>
+    <button class="btn-limpiar" onclick="limpiarTodo()">Borrar texto</button>
+  </div>
+</div>
 
 <div id="salida"></div>
 
 <script>
-// Pegá aquí la lógica del archivo JS
 // ===================== A. UTILIDADES =====================
 function normalizar(texto) {
   return String(texto == null ? '' : texto)
@@ -80,6 +352,66 @@ function clasificarColumna(encabezado) {
 }
 
 // ===================== C. PARSEO DE TEXTO PEGADO =====================
+
+// A veces al copiar (desde un PDF, un visor web, etc.) se pierden los
+// saltos de línea entre filas y todo queda en una sola línea separada por
+// tabs. En ese caso, el último campo de una fila y el primer campo de la
+// fila siguiente quedan "fusionados" en un mismo campo, unidos por un
+// espacio (ej: "3 LA NUEVA METROPOL S.A."). Esta función detecta ese caso
+// y reconstruye los saltos de línea, usando como ancho de fila la
+// cantidad de columnas del encabezado.
+function reconstruirFilasFusionadas(texto) {
+  const lineasOriginales = String(texto || '').split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
+  if (lineasOriginales.length > 2) return texto; // ya viene con saltos de línea normales, no tocar
+
+  const sep = lineasOriginales.some(l => l.includes('\t')) ? '\t' : null;
+  if (!sep) return texto;
+
+  const campos = lineasOriginales.join(' ').split(sep).map(c => c.trim());
+  if (campos.length < 8) return texto;
+
+  // Detectar ancho de fila a partir de cuántas columnas reconoce el encabezado
+  const anchoEncabezado = campos.slice(0, 12).filter(c => clasificarColumna(c)).length;
+  const ancho = anchoEncabezado >= 4 ? anchoEncabezado : ORDEN_POR_DEFECTO.length;
+
+  // El encabezado (primeros `ancho` campos) puede traer pegado el primer
+  // valor de la primera fila de datos en el último campo. Lo separamos
+  // igual que el resto, así que arrancamos el proceso desde el campo 0.
+  const filasReconstruidas = [];
+  let resto = campos.slice();
+  let avanzo = true;
+
+  while (resto.length >= ancho && avanzo) {
+    avanzo = false;
+    const bloque = resto.slice(0, ancho).slice();
+    const ultimo = bloque[ancho - 1];
+
+    // Si el siguiente campo existe y el último campo del bloque actual
+    // contiene un espacio, significa que ahí está fusionado el primer
+    // valor de la fila siguiente. El patrón real es "<total> <cliente...>",
+    // así que partimos en el PRIMER espacio (el cliente puede tener
+    // varias palabras; el total nunca tiene espacios).
+    const idxEspacio = ultimo.indexOf(' ');
+    if (idxEspacio > -1) {
+      const valorReal = ultimo.slice(0, idxEspacio).trim();
+      const inicioSiguiente = ultimo.slice(idxEspacio + 1).trim();
+      bloque[ancho - 1] = valorReal;
+      filasReconstruidas.push(bloque.join(sep));
+      resto = [inicioSiguiente, ...resto.slice(ancho)];
+      avanzo = true;
+    } else {
+      filasReconstruidas.push(bloque.join(sep));
+      resto = resto.slice(ancho);
+      avanzo = resto.length > 0;
+    }
+  }
+
+  // Sobrantes (ej. "Total general" final con celdas vacías): se descartan,
+  // parsearDatos ya ignora filas sin modelo/talle.
+  if (filasReconstruidas.length < 2) return texto;
+  return filasReconstruidas.join('\n');
+}
+
 function partirEnLineas(texto) {
   return String(texto || '').split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
 }
@@ -98,7 +430,10 @@ const ORDEN_POR_DEFECTO = ['cliente', 'fecha', 'numeroPedido', 'modelo', 'talle'
 function parsearDatos(textoPegado) {
   const resultado = { ok: false, error: null, registros: [], cabecera: {}, advertencias: [], totales: null, columnasDetectadas: [], huboEncabezado: false };
 
-  const lineas = partirEnLineas(textoPegado);
+  const textoReconstruido = reconstruirFilasFusionadas(textoPegado);
+  resultado.seReconstruyeronFilas = textoReconstruido !== textoPegado;
+
+  const lineas = partirEnLineas(textoReconstruido);
   if (lineas.length === 0) {
     resultado.error = { tipo: 'vacio', mensaje: 'Pegá filas de datos copiadas desde Excel antes de procesar el pedido.' };
     return resultado;
@@ -199,10 +534,12 @@ function parsearDatos(textoPegado) {
     resultado.advertencias.push(`${filasNoNumericas} fila(s) tenían valores no numéricos en Pedido o Disponible; se consideraron como 0.`);
   }
 
+  if (resultado.seReconstruyeronFilas) {
+    resultado.advertencias.unshift('El texto pegado no tenía saltos de línea entre filas (común al copiar desde un PDF o visor web); se reconstruyeron automáticamente. Revisá los datos antes de confiar en el resultado.');
+  }
+
   // Cabecera: cliente / pedido / fecha más frecuentes (o primer valor no vacío)
   function valorMasFrecuente(campo) {
-    const conteo = {};
-    registros.forEach(r => { if (r[campo]) conteo[r[campo]] = (conteo[campo in conteo ? r[campo] : r[campo]] || 0); });
     const cuenta = {};
     registros.forEach(r => { if (r[campo]) cuenta[r[campo]] = (cuenta[r[campo]] || 0) + 1; });
     const entradas = Object.entries(cuenta).sort((a, b) => b[1] - a[1]);
@@ -236,11 +573,11 @@ function parsearDatos(textoPegado) {
 // ===================== D. ESTADOS Y TOTALES =====================
 function calcularEstado(pedido, disponible) {
   if (pedido <= 0) return { clave: 'sin-pedido', label: 'Sin pedido', icono: '', faltan: 0 };
-  if (disponible >= pedido) return { clave: 'completo', label: 'Completo', icono: '✅', faltan: 0 };
+  if (disponible >= pedido) return { clave: 'completo', label: 'Completo', icono: '✓', faltan: 0 };
   const faltan = pedido - disponible;
   const ratio = disponible / pedido;
-  if (ratio >= 0.5) return { clave: 'parcial', label: `Faltan ${faltan}`, icono: '⚠️', faltan };
-  return { clave: 'critico', label: `Faltan ${faltan}`, icono: '❌', faltan };
+  if (ratio >= 0.5) return { clave: 'parcial', label: `Faltan ${faltan}`, icono: '!', faltan };
+  return { clave: 'critico', label: `Faltan ${faltan}`, icono: '✕', faltan };
 }
 
 function calcularTotales(registros) {
@@ -252,96 +589,112 @@ function calcularTotales(registros) {
   return { totalLineas, totalSolicitado, totalDisponible, totalCubierto, cumplimiento };
 }
 
-module.exports = { normalizar, aNumero, formatearFecha, clasificarColumna, parsearDatos, calcularEstado, calcularTotales };
+// ===================== E. INTERFAZ =====================
+let ultimoResultado = null; // guarda el último resultado procesado para exportar
 
-
-let ultimoResultado = null;
-let historial = JSON.parse(localStorage.getItem('historialPedidos') || '[]');
+function escaparHTML(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 function procesar(){
-  const txt=document.getElementById('entrada').value;
-  const res=parsearDatos(txt);
-  ultimoResultado = res;
-  const out=document.getElementById('salida');
+  const txt = document.getElementById('entrada').value;
+  const res = parsearDatos(txt);
+  const out = document.getElementById('salida');
+  const btnExportar = document.getElementById('btnExportar');
 
   if(!res.ok){
-    out.innerHTML='<div class="card"><b>Error:</b> '+res.error.mensaje+'</div>';
+    out.innerHTML = `<div class="card-error"><b>No se pudo procesar</b>${escaparHTML(res.error.mensaje)}</div>`;
+    ultimoResultado = null;
+    btnExportar.disabled = true;
     return;
   }
 
-  let html=`
-  <div class="card">
-    <b>Cliente:</b> ${res.cabecera.cliente}<br>
-    <b>Pedido:</b> ${res.cabecera.numeroPedido}<br>
-    <b>Fecha:</b> ${res.cabecera.fecha}<br>
-    <b>Cumplimiento:</b> ${res.totales.cumplimiento.toFixed(2)}%
+  ultimoResultado = res;
+  btnExportar.disabled = false;
+
+  let html = '';
+
+  if (res.advertencias.length){
+    html += `<div class="card-advertencias"><b>Atención</b><ul>${res.advertencias.map(a => `<li>${escaparHTML(a)}</li>`).join('')}</ul></div>`;
+  }
+
+  html += `
+  <div class="resumen">
+    <div class="item"><div class="etq">Cliente</div><div class="val">${escaparHTML(res.cabecera.cliente)}</div></div>
+    <div class="item"><div class="etq">Pedido</div><div class="val">${escaparHTML(res.cabecera.numeroPedido)}</div></div>
+    <div class="item"><div class="etq">Fecha</div><div class="val">${escaparHTML(res.cabecera.fecha)}</div></div>
+    <div class="item cumplimiento"><div class="etq">Cumplimiento</div><div class="val">${res.totales.cumplimiento.toFixed(2)}%</div></div>
   </div>
   <table>
-  <tr>
-    <th>Modelo</th><th>Talle</th><th>Pedido</th>
-    <th>Disponible</th><th>Estado</th>
-  </tr>`;
+  <thead><tr>
+    <th>Modelo</th><th>Talle</th><th>Pedido</th><th>Disponible</th><th>Estado</th>
+  </tr></thead>
+  <tbody>`;
 
-  res.registros.forEach(r=>{
+  res.registros.forEach(r => {
     html += `<tr>
-      <td>${r.modelo}</td>
-      <td>${r.talle}</td>
-      <td>${r.pedido}</td>
-      <td>${r.disponible}</td>
-      <td>${r.estado.icono} ${r.estado.label}</td>
+      <td data-col="Modelo">${escaparHTML(r.modelo)}</td>
+      <td data-col="Talle">${escaparHTML(r.talle)}</td>
+      <td data-col="Pedido" class="num">${r.pedido}</td>
+      <td data-col="Disponible" class="num">${r.disponible}</td>
+      <td data-col="Estado"><span class="pill ${r.estado.clave}">${r.estado.icono ? r.estado.icono + ' ' : ''}${escaparHTML(r.estado.label)}</span></td>
     </tr>`;
   });
 
-  html += "</table>";
-  historial.push({
-    fechaProceso: new Date().toLocaleString(),
-    cabecera: res.cabecera,
-    totales: res.totales,
-    registros: res.registros
-  });
-
-  localStorage.setItem('historialPedidos', JSON.stringify(historial));
-
-  out.innerHTML=html;
+  html += '</tbody></table>';
+  out.innerHTML = html;
 }
 
-function exportarExcel() {
-
-  if (!ultimoResultado || !ultimoResultado.ok) {
-    alert("Primero procesá un pedido.");
-    return;
-  }
-
-  let contenido = "Modelo\tTalle\tPedido\tDisponible\tEstado\n";
-
-  ultimoResultado.registros.forEach(r => {
-    contenido += `${r.modelo}\t${r.talle}\t${r.pedido}\t${r.disponible}\t${r.estado.label}\n`;
-  });
-
-  const blob = new Blob([contenido], {
-    type: "application/vnd.ms-excel;charset=utf-8;"
-  });
-
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `reporte_pedido_${Date.now()}.xls`;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+function limpiarTodo(){
+  document.getElementById('entrada').value = '';
+  document.getElementById('salida').innerHTML = '<div class="vacio">Pegá datos y presioná «Procesar pedido» para ver el resultado.</div>';
+  document.getElementById('btnExportar').disabled = true;
+  ultimoResultado = null;
+  document.getElementById('entrada').focus();
 }
 
-function borrarHistorial() {
+function exportarExcel(){
+  if (!ultimoResultado) return;
+  const res = ultimoResultado;
 
-  if (!confirm("¿Deseás borrar todo el historial guardado?")) {
-    return;
-  }
+  const filas = res.registros.map(r => ({
+    'Modelo': r.modelo,
+    'Talle': r.talle,
+    'Pedido': r.pedido,
+    'Disponible': r.disponible,
+    'Estado': r.estado.label
+  }));
 
-  historial = [];
-  localStorage.removeItem('historialPedidos');
+  const hoja = XLSX.utils.json_to_sheet(filas);
+  hoja['!cols'] = [{wch:18},{wch:10},{wch:10},{wch:12},{wch:16}];
 
-  alert("Historial eliminado correctamente.");
+  const libro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hoja, 'Pedido');
+
+  // Hoja de resumen
+  const resumen = [
+    { Campo: 'Cliente', Valor: res.cabecera.cliente },
+    { Campo: 'Pedido', Valor: res.cabecera.numeroPedido },
+    { Campo: 'Fecha', Valor: res.cabecera.fecha },
+    { Campo: 'Líneas', Valor: res.totales.totalLineas },
+    { Campo: 'Total solicitado', Valor: res.totales.totalSolicitado },
+    { Campo: 'Total disponible', Valor: res.totales.totalDisponible },
+    { Campo: 'Total cubierto', Valor: res.totales.totalCubierto },
+    { Campo: 'Cumplimiento (%)', Valor: Number(res.totales.cumplimiento.toFixed(2)) }
+  ];
+  const hojaResumen = XLSX.utils.json_to_sheet(resumen, { skipHeader: true });
+  hojaResumen['!cols'] = [{wch:18},{wch:20}];
+  XLSX.utils.book_append_sheet(libro, hojaResumen, 'Resumen');
+
+  const nombreCliente = (res.cabecera.cliente || 'pedido').replace(/[^a-z0-9áéíóúñ]+/gi, '_');
+  const nombrePedido = (res.cabecera.numeroPedido || '').replace(/[^a-z0-9áéíóúñ]+/gi, '_');
+  const nombreArchivo = `pedido_${nombreCliente}${nombrePedido ? '_' + nombrePedido : ''}.xlsx`;
+
+  XLSX.writeFile(libro, nombreArchivo);
 }
+
+// Estado inicial
+document.getElementById('salida').innerHTML = '<div class="vacio">Pegá datos y presioná «Procesar pedido» para ver el resultado.</div>';
 </script>
 </body>
 </html>
