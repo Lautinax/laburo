@@ -267,6 +267,124 @@
     border-radius: 4px;
   }
 
+  /* ===== Buscador ===== */
+  .panel-busqueda{
+    background: var(--panel);
+    border: 1px solid var(--linea);
+    border-radius: 4px;
+    padding: 18px 20px;
+    margin-bottom: 22px;
+  }
+
+  .panel-busqueda .fila-titulo{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .panel-busqueda label{
+    display:block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .panel-busqueda .ayuda{
+    font-size: 0.78rem;
+    color: var(--tinta-suave);
+    margin: -4px 0 12px;
+  }
+
+  .contador-resultados{
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--tinta-suave);
+    white-space: nowrap;
+  }
+
+  .contador-resultados b{ color: var(--acento); }
+
+  textarea#busqueda{
+    width:100%;
+    height: 70px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    border: 1px solid var(--linea);
+    border-radius: 3px;
+    padding: 10px 12px;
+    resize: vertical;
+    background: #fdfcf9;
+    color: var(--tinta);
+  }
+
+  textarea#busqueda:focus{
+    outline: 2px solid var(--acento);
+    outline-offset: 1px;
+  }
+
+  .filtros-campo{
+    display:flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .filtros-campo label.chk{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--tinta-suave);
+    cursor:pointer;
+  }
+
+  .filtros-campo input[type="checkbox"]{
+    accent-color: var(--acento);
+    width: 14px;
+    height: 14px;
+    cursor:pointer;
+  }
+
+  .chips-terminos{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top: 10px;
+  }
+
+  .chip{
+    background: var(--acento-suave);
+    color: var(--acento);
+    border-radius: 100px;
+    padding: 3px 10px 3px 12px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    display:inline-flex;
+    align-items:center;
+    gap: 6px;
+    font-family: var(--mono);
+  }
+
+  .sin-coincidencias{
+    text-align:center;
+    color: var(--tinta-suave);
+    font-size: 0.86rem;
+    padding: 30px 20px;
+  }
+
+  mark{
+    background: var(--acento-suave);
+    color: var(--acento);
+    border-radius: 2px;
+    padding: 0 2px;
+    font-weight: 700;
+  }
+
   @media (max-width: 640px){
     .resumen{ grid-template-columns: repeat(2,1fr); }
     table, thead, tbody, th, td, tr{ display:block; }
@@ -294,6 +412,17 @@
     <button class="btn-exportar" id="btnExportar" onclick="exportarExcel()" disabled>Exportar a Excel</button>
     <button class="btn-limpiar" onclick="limpiarTodo()">Borrar texto</button>
   </div>
+</div>
+
+<div class="panel-busqueda" id="panelBusqueda" style="display:none;">
+  <div class="fila-titulo">
+    <label for="busqueda">Buscar en los resultados</label>
+    <span class="contador-resultados" id="contadorResultados"></span>
+  </div>
+  <p class="ayuda">Escribí o pegá uno o varios valores (separados por espacio, coma o salto de línea) para filtrar por cliente, modelo, talle, N° de pedido, etc.</p>
+  <textarea id="busqueda" placeholder="Ej: LA NUEVA METROPOL, 38, REM-203" oninput="aplicarBusqueda()"></textarea>
+  <div class="chips-terminos" id="chipsTerminos"></div>
+  <div class="filtros-campo" id="filtrosCampo"></div>
 </div>
 
 <div id="salida"></div>
@@ -591,11 +720,168 @@ function calcularTotales(registros) {
   return { totalLineas, totalSolicitado, totalDisponible, totalCubierto, cumplimiento };
 }
 
-// ===================== E. INTERFAZ =====================
+// ===================== E. BÚSQUEDA / FILTRO =====================
+// Campos sobre los que se puede buscar, con su etiqueta visible en el
+// panel de filtros por campo.
+const CAMPOS_BUSCABLES = [
+  { clave: 'cliente',      etiqueta: 'Cliente' },
+  { clave: 'numeroPedido', etiqueta: 'N° Pedido' },
+  { clave: 'modelo',       etiqueta: 'Modelo' },
+  { clave: 'talle',        etiqueta: 'Talle' },
+  { clave: 'fecha',        etiqueta: 'Fecha' }
+];
+
+// Campos activos para la búsqueda (todos por defecto). Se guarda en una
+// variable global simple porque sólo hay un panel de búsqueda en la página.
+let camposActivos = new Set(CAMPOS_BUSCABLES.map(c => c.clave));
+
+// Convierte el texto pegado/escrito en el buscador en una lista de
+// términos individuales. Igual que con el pegado de Excel, el usuario
+// puede pegar muchos valores juntos (una columna de clientes, por
+// ejemplo): se separan por salto de línea, tab, coma o punto y coma.
+function partirTerminos(texto) {
+  return String(texto || '')
+    .split(/[\n\r\t,;]+/)
+    .map(t => t.trim())
+    .filter(t => t !== '');
+}
+
+// Determina si un registro coincide con AL MENOS UNO de los términos
+// (en cualquiera de los campos activos). Cada término se compara de
+// forma normalizada (sin acentos, minúsculas) y por inclusión parcial,
+// para que "metropol" encuentre "LA NUEVA METROPOL S.A.".
+function registroCoincide(registro, terminosNormalizados) {
+  if (terminosNormalizados.length === 0) return true;
+  return terminosNormalizados.some(termino => {
+    return CAMPOS_BUSCABLES.some(campo => {
+      if (!camposActivos.has(campo.clave)) return false;
+      const valor = normalizar(registro[campo.clave]);
+      return valor && valor.includes(termino);
+    });
+  });
+}
+
+function filtrarRegistros(registros, textoBusqueda) {
+  const terminos = partirTerminos(textoBusqueda);
+  const terminosNormalizados = terminos.map(normalizar).filter(Boolean);
+  if (terminosNormalizados.length === 0) return { filtrados: registros, terminos: [] };
+  const filtrados = registros.filter(r => registroCoincide(r, terminosNormalizados));
+  return { filtrados, terminos };
+}
+
+// Resalta, dentro de un valor de celda ya escapado para HTML, las
+// coincidencias de los términos buscados. Se hace sobre el texto crudo
+// (antes de escapar) para no romper las entidades HTML.
+function resaltar(valor, terminosNormalizados) {
+  const texto = String(valor ?? '');
+  if (!texto || terminosNormalizados.length === 0) return escaparHTML(texto);
+  const norm = normalizar(texto);
+  // Construir lista de rangos [inicio, fin) que matchean algún término
+  let rangos = [];
+  terminosNormalizados.forEach(t => {
+    if (!t) return;
+    let desde = 0;
+    let idx;
+    while ((idx = norm.indexOf(t, desde)) !== -1) {
+      rangos.push([idx, idx + t.length]);
+      desde = idx + t.length;
+    }
+  });
+  if (rangos.length === 0) return escaparHTML(texto);
+  rangos.sort((a, b) => a[0] - b[0]);
+  // Fusionar rangos superpuestos
+  const fusionados = [rangos[0]];
+  for (let i = 1; i < rangos.length; i++) {
+    const ultimo = fusionados[fusionados.length - 1];
+    if (rangos[i][0] <= ultimo[1]) ultimo[1] = Math.max(ultimo[1], rangos[i][1]);
+    else fusionados.push(rangos[i]);
+  }
+  let html = '';
+  let cursor = 0;
+  fusionados.forEach(([ini, fin]) => {
+    html += escaparHTML(texto.slice(cursor, ini));
+    html += `<mark>${escaparHTML(texto.slice(ini, fin))}</mark>`;
+    cursor = fin;
+  });
+  html += escaparHTML(texto.slice(cursor));
+  return html;
+}
+
+// ===================== F. INTERFAZ =====================
 let ultimoResultado = null; // guarda el último resultado procesado para exportar
 
 function escaparHTML(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function construirFiltrosCampo(){
+  const cont = document.getElementById('filtrosCampo');
+  cont.innerHTML = CAMPOS_BUSCABLES.map(c => `
+    <label class="chk">
+      <input type="checkbox" data-campo="${c.clave}" ${camposActivos.has(c.clave) ? 'checked' : ''} onchange="alternarCampo('${c.clave}', this.checked)">
+      ${escaparHTML(c.etiqueta)}
+    </label>
+  `).join('');
+}
+
+function alternarCampo(clave, activo){
+  if (activo) camposActivos.add(clave);
+  else camposActivos.delete(clave);
+  aplicarBusqueda();
+}
+
+function actualizarChips(terminos){
+  const cont = document.getElementById('chipsTerminos');
+  if (terminos.length <= 1) { cont.innerHTML = ''; return; }
+  cont.innerHTML = terminos.map(t => `<span class="chip">${escaparHTML(t)}</span>`).join('');
+}
+
+function aplicarBusqueda(){
+  if (!ultimoResultado) return;
+  const textoBusqueda = document.getElementById('busqueda').value;
+  const { filtrados, terminos } = filtrarRegistros(ultimoResultado.registros, textoBusqueda);
+  const terminosNormalizados = terminos.map(normalizar).filter(Boolean);
+
+  actualizarChips(terminos);
+
+  const contador = document.getElementById('contadorResultados');
+  if (terminos.length === 0) {
+    contador.innerHTML = '';
+  } else {
+    contador.innerHTML = `<b>${filtrados.length}</b> de ${ultimoResultado.registros.length} líneas`;
+  }
+
+  renderizarTabla(filtrados, terminosNormalizados);
+}
+
+function renderizarTabla(registros, terminosNormalizados){
+  const cont = document.getElementById('contenedorTabla');
+  if (!cont) return;
+
+  if (registros.length === 0) {
+    cont.innerHTML = '<div class="sin-coincidencias">Ningún resultado coincide con la búsqueda. Probá con otro cliente, modelo o talle.</div>';
+    return;
+  }
+
+  let html = `<table>
+  <thead><tr>
+    <th>Modelo</th><th>Talle</th><th>N° Pedido</th><th class="num">Cant. pedida</th><th class="num">Disponible</th><th>Estado</th>
+  </tr></thead>
+  <tbody>`;
+
+  registros.forEach(r => {
+    html += `<tr>
+      <td data-col="Modelo">${resaltar(r.modelo, terminosNormalizados)}</td>
+      <td data-col="Talle">${resaltar(r.talle, terminosNormalizados)}</td>
+      <td data-col="N° Pedido">${r.numeroPedido ? resaltar(r.numeroPedido, terminosNormalizados) : '—'}</td>
+      <td data-col="Cant. pedida" class="num">${r.pedido}</td>
+      <td data-col="Disponible" class="num">${r.disponible}</td>
+      <td data-col="Estado"><span class="pill ${r.estado.clave}">${r.estado.icono ? r.estado.icono + ' ' : ''}${escaparHTML(r.estado.label)}</span></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  cont.innerHTML = html;
 }
 
 function procesar(){
@@ -603,16 +889,26 @@ function procesar(){
   const res = parsearDatos(txt);
   const out = document.getElementById('salida');
   const btnExportar = document.getElementById('btnExportar');
+  const panelBusqueda = document.getElementById('panelBusqueda');
 
   if(!res.ok){
     out.innerHTML = `<div class="card-error"><b>No se pudo procesar</b>${escaparHTML(res.error.mensaje)}</div>`;
     ultimoResultado = null;
     btnExportar.disabled = true;
+    panelBusqueda.style.display = 'none';
     return;
   }
 
   ultimoResultado = res;
   btnExportar.disabled = false;
+
+  // Reiniciar el buscador para el nuevo lote de datos
+  document.getElementById('busqueda').value = '';
+  camposActivos = new Set(CAMPOS_BUSCABLES.map(c => c.clave));
+  construirFiltrosCampo();
+  document.getElementById('chipsTerminos').innerHTML = '';
+  document.getElementById('contadorResultados').innerHTML = '';
+  panelBusqueda.style.display = '';
 
   let html = '';
 
@@ -627,31 +923,20 @@ function procesar(){
     <div class="item"><div class="etq">Fecha</div><div class="val">${escaparHTML(res.cabecera.fecha)}</div></div>
     <div class="item cumplimiento"><div class="etq">Cumplimiento</div><div class="val">${res.totales.cumplimiento.toFixed(2)}%</div></div>
   </div>
-  <table>
-  <thead><tr>
-    <th>Modelo</th><th>Talle</th><th>N° Pedido</th><th class="num">Cant. pedida</th><th class="num">Disponible</th><th>Estado</th>
-  </tr></thead>
-  <tbody>`;
+  <div id="contenedorTabla"></div>`;
 
-  res.registros.forEach(r => {
-    html += `<tr>
-      <td data-col="Modelo">${escaparHTML(r.modelo)}</td>
-      <td data-col="Talle">${escaparHTML(r.talle)}</td>
-      <td data-col="N° Pedido">${escaparHTML(r.numeroPedido || '—')}</td>
-      <td data-col="Cant. pedida" class="num">${r.pedido}</td>
-      <td data-col="Disponible" class="num">${r.disponible}</td>
-      <td data-col="Estado"><span class="pill ${r.estado.clave}">${r.estado.icono ? r.estado.icono + ' ' : ''}${escaparHTML(r.estado.label)}</span></td>
-    </tr>`;
-  });
-
-  html += '</tbody></table>';
   out.innerHTML = html;
+  renderizarTabla(res.registros, []);
 }
 
 function limpiarTodo(){
   document.getElementById('entrada').value = '';
   document.getElementById('salida').innerHTML = '<div class="vacio">Pegá datos y presioná «Procesar pedido» para ver el resultado.</div>';
   document.getElementById('btnExportar').disabled = true;
+  document.getElementById('panelBusqueda').style.display = 'none';
+  document.getElementById('busqueda').value = '';
+  document.getElementById('chipsTerminos').innerHTML = '';
+  document.getElementById('contadorResultados').innerHTML = '';
   ultimoResultado = null;
   document.getElementById('entrada').focus();
 }
@@ -660,7 +945,13 @@ function exportarExcel(){
   if (!ultimoResultado) return;
   const res = ultimoResultado;
 
-  const filas = res.registros.map(r => ({
+  // Si hay una búsqueda activa, exportar lo filtrado en lugar de todo el pedido.
+  const textoBusqueda = document.getElementById('busqueda') ? document.getElementById('busqueda').value : '';
+  const { filtrados } = filtrarRegistros(res.registros, textoBusqueda);
+  const registrosAExportar = filtrados.length ? filtrados : res.registros;
+
+  const filas = registrosAExportar.map(r => ({
+    'Cliente': r.cliente,
     'Modelo': r.modelo,
     'Talle': r.talle,
     'N° Pedido': r.numeroPedido,
@@ -670,7 +961,7 @@ function exportarExcel(){
   }));
 
   const hoja = XLSX.utils.json_to_sheet(filas);
-  hoja['!cols'] = [{wch:18},{wch:10},{wch:12},{wch:12},{wch:12},{wch:16}];
+  hoja['!cols'] = [{wch:22},{wch:18},{wch:10},{wch:12},{wch:12},{wch:12},{wch:16}];
 
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, 'Pedido');
@@ -692,7 +983,8 @@ function exportarExcel(){
 
   const nombreCliente = (res.cabecera.cliente || 'pedido').replace(/[^a-z0-9áéíóúñ]+/gi, '_');
   const nombrePedido = (res.cabecera.numeroPedido || '').replace(/[^a-z0-9áéíóúñ]+/gi, '_');
-  const nombreArchivo = `pedido_${nombreCliente}${nombrePedido ? '_' + nombrePedido : ''}.xlsx`;
+  const sufijoFiltro = textoBusqueda.trim() ? '_filtrado' : '';
+  const nombreArchivo = `pedido_${nombreCliente}${nombrePedido ? '_' + nombrePedido : ''}${sufijoFiltro}.xlsx`;
 
   XLSX.writeFile(libro, nombreArchivo);
 }
