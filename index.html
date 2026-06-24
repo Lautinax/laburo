@@ -863,6 +863,9 @@ function renderizarTabla(registros, terminosNormalizados){
     return;
   }
 
+  const totalPedido = registros.reduce((s,r)=>s + (Number(r.pedido)||0), 0);
+  const totalDisponible = registros.reduce((s,r)=>s + (Number(r.disponible)||0), 0);
+
   let html = `<table>
   <thead><tr>
     <th>Modelo</th><th>Talle</th><th>N° Pedido</th><th class="num">Cant. pedida</th><th class="num">Disponible</th><th>Estado</th>
@@ -880,7 +883,16 @@ function renderizarTabla(registros, terminosNormalizados){
     </tr>`;
   });
 
-  html += '</tbody></table>';
+  html += `</tbody>
+  <tfoot>
+    <tr style="font-weight:bold;background:#f5f5f5;">
+      <td colspan="3">TOTALES</td>
+      <td class="num">${totalPedido}</td>
+      <td class="num">${totalDisponible}</td>
+      <td></td>
+    </tr>
+  </tfoot>
+  </table>`;
   cont.innerHTML = html;
 }
 
