@@ -917,6 +917,7 @@ function exportarExcel(){
 
   const filas = registrosAExportar.map(r => ({
     'Cliente': r.cliente,
+    'Fecha': r.fecha,
     'Modelo': r.modelo,
     'Talle': r.talle,
     'N° Pedido': r.numeroPedido,
@@ -926,7 +927,7 @@ function exportarExcel(){
   }));
 
   const hoja = XLSX.utils.json_to_sheet(filas);
-  hoja['!cols'] = [{wch:22},{wch:18},{wch:10},{wch:12},{wch:12},{wch:12},{wch:16}];
+  hoja['!cols'] = [{wch:22},{wch:14},{wch:18},{wch:10},{wch:12},{wch:12},{wch:12},{wch:16}];
 
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, 'Pedido');
@@ -964,6 +965,7 @@ function copiarAlPortapapelesExcel() {
     <thead>
       <tr style="background-color:#1c2b2e; color:#ffffff; font-weight:bold; text-align:center;">
         <th style="padding:6px 10px; border:1px solid #dcd6c8;">Cliente</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Fecha</th>
         <th style="padding:6px 10px; border:1px solid #dcd6c8;">Modelo</th>
         <th style="padding:6px 10px; border:1px solid #dcd6c8;">Talle</th>
         <th style="padding:6px 10px; border:1px solid #dcd6c8;">N° Pedido</th>
@@ -983,6 +985,7 @@ function copiarAlPortapapelesExcel() {
 
     htmlTable += `<tr>
       <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:left;">${escaparHTML(r.cliente || '—')}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${escaparHTML(r.fecha || '—')}</td>
       <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:left;">${escaparHTML(r.modelo)}</td>
       <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${escaparHTML(r.talle)}</td>
       <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${r.numeroPedido ? escaparHTML(r.numeroPedido) : '—'}</td>
@@ -996,7 +999,7 @@ function copiarAlPortapapelesExcel() {
   const totalDisponible = registrosAExportar.reduce((s,r)=>s + (Number(r.disponible)||0), 0);
   
   htmlTable += `<tr style="font-weight:bold; background-color:#f5f5f5;">
-    <td colspan="4" style="padding:6px 10px; border:1px solid #dcd6c8; text-align:left;">TOTALES</td>
+    <td colspan="5" style="padding:6px 10px; border:1px solid #dcd6c8; text-align:left;">TOTALES</td>
     <td style="padding:6px 10px; border:1px solid #dcd6c8; text-align:center;">${totalPedido}</td>
     <td style="padding:6px 10px; border:1px solid #dcd6c8; text-align:center;">${totalDisponible}</td>
     <td style="padding:6px 10px; border:1px solid #dcd6c8;"></td>
