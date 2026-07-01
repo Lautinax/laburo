@@ -392,7 +392,7 @@
     tbody tr{ border-bottom: 2px solid var(--linea); padding: 10px 0; }
     tbody td{ border-bottom:none; display:flex; justify-content:space-between; gap:10px; padding:4px 14px; }
     tbody td.num{ text-align:right; }
-    tbody td::before{ content attr(data-col); font-weight:600; color:var(--tinta-suave); }
+    tbody td::before{ content: attr(data-col); font-weight:600; color:var(--tinta-suave); }
   }
 </style>
 </head>
@@ -410,6 +410,7 @@
   <div class="acciones">
     <button class="btn-primario" onclick="procesar()">Procesar pedido</button>
     <button class="btn-exportar" id="btnExportar" onclick="exportarExcel()" disabled>Exportar a Excel</button>
+    <button class="btn-exportar" id="btnCopiarExcel" onclick="copiarAlPortapapelesExcel()" disabled style="background: var(--acento-suave); color: var(--acento); border-color: #f0d5c1;">Copiar Formato Excel</button>
     <button class="btn-limpiar" onclick="limpiarTodo()">Borrar texto</button>
   </div>
 </div>
@@ -466,9 +467,6 @@ function formatearFecha(texto) {
 }
 
 // ===================== B. CLASIFICACIÓN DE COLUMNAS =====================
-// Importante: se revisa "total" ANTES que "pedido" porque "total_pedido"
-// contiene la palabra "pedido" pero representa una CANTIDAD, no el número
-// de pedido/orden.
 function clasificarColumna(encabezado) {
   const norm = normalizar(encabezado);
   if (!norm) return null;
@@ -483,17 +481,9 @@ function clasificarColumna(encabezado) {
 }
 
 // ===================== C. PARSEO DE TEXTO PEGADO =====================
-
-// A veces al copiar (desde un PDF, un visor web, etc.) se pierden los
-// saltos de línea entre filas y todo queda en una sola línea separada por
-// tabs. En ese caso, el último campo de una fila y el primer campo de la
-// fila siguiente quedan "fusionados" en un mismo campo, unidos por un
-// espacio (ej: "3 LA NUEVA METROPOL S.A."). Esta función detecta ese caso
-// y reconstruye los saltos de línea, usando como ancho de fila la
-// cantidad de columnas del encabezado.
 function reconstruirFilasFusionadas(texto) {
   const lineasOriginales = String(texto || '').split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
-  if (lineasOriginales.length > 2) return texto; // ya viene con saltos de línea normales, no tocar
+  if (lineasOriginales.length > 2) return texto;
 
   const sep = lineasOriginales.some(l => l.includes('\t')) ? '\t' : null;
   if (!sep) return texto;
@@ -501,13 +491,9 @@ function reconstruirFilasFusionadas(texto) {
   const campos = lineasOriginales.join(' ').split(sep).map(c => c.trim());
   if (campos.length < 8) return texto;
 
-  // Detectar ancho de fila a partir de cuántas columnas reconoce el encabezado
   const anchoEncabezado = campos.slice(0, 12).filter(c => clasificarColumna(c)).length;
   const ancho = anchoEncabezado >= 4 ? anchoEncabezado : ORDEN_POR_DEFECTO.length;
 
-  // El encabezado (primeros `ancho` campos) puede traer pegado el primer
-  // valor de la primera fila de datos en el último campo. Lo separamos
-  // igual que el resto, así que arrancamos el proceso desde el campo 0.
   const filasReconstruidas = [];
   let resto = campos.slice();
   let avanzo = true;
@@ -517,11 +503,6 @@ function reconstruirFilasFusionadas(texto) {
     const bloque = resto.slice(0, ancho).slice();
     const ultimo = bloque[ancho - 1];
 
-    // Si el siguiente campo existe y el último campo del bloque actual
-    // contiene un espacio, significa que ahí está fusionado el primer
-    // valor de la fila siguiente. El patrón real es "<total> <cliente...>",
-    // así que partimos en el PRIMER espacio (el cliente puede tener
-    // varias palabras; el total nunca tiene espacios).
     const idxEspacio = ultimo.indexOf(' ');
     if (idxEspacio > -1) {
       const valorReal = ultimo.slice(0, idxEspacio).trim();
@@ -537,8 +518,6 @@ function reconstruirFilasFusionadas(texto) {
     }
   }
 
-  // Sobrantes (ej. "Total general" final con celdas vacías): se descartan,
-  // parsearDatos ya ignora filas sin modelo/talle.
   if (filasReconstruidas.length < 2) return texto;
   return filasReconstruidas.join('\n');
 }
@@ -550,7 +529,6 @@ function partirEnLineas(texto) {
 function detectarSeparador(lineas) {
   if (lineas.some(l => l.includes('\t'))) return '\t';
   if (lineas.some(l => l.includes(';'))) return ';';
-  // CSV con comas: solo si el conteo de columnas es consistente y > 1
   const conteos = lineas.map(l => l.split(',').length);
   if (lineas.some(l => l.includes(',')) && conteos.every(c => c === conteos[0]) && conteos[0] > 1) return ',';
   return null;
@@ -589,9 +567,6 @@ function parsearDatos(textoPegado) {
   let filasDatos;
   let huboEncabezado = false;
 
-  // Se considera encabezado si al menos 3 columnas distintas fueron
-  // identificadas y entre ellas está cliente, modelo o talle (no son
-  // valores que aparezcan tipeados así por casualidad en datos reales).
   const pareceEncabezado = tiposUnicos.size >= 3 && (tiposUnicos.has('cliente') || tiposUnicos.has('modelo') || tiposUnicos.has('talle'));
 
   if (pareceEncabezado) {
@@ -602,9 +577,6 @@ function parsearDatos(textoPegado) {
     });
     filasDatos = filas.slice(1);
   } else if (primerFila.length === ORDEN_POR_DEFECTO.length) {
-    // Sin encabezado reconocible, pero la cantidad de columnas coincide
-    // con el formato estándar: cliente, fecha, pedido, modelo, talle,
-    // disponible, total_pedido (en ese orden).
     ORDEN_POR_DEFECTO.forEach((tipo, idx) => { columnas[tipo] = idx; });
     filasDatos = filas;
   } else {
@@ -631,14 +603,13 @@ function parsearDatos(textoPegado) {
     return resultado;
   }
 
-  // Construir registros
   const registros = [];
   let filasNoNumericas = 0;
   filasDatos.forEach((fila, i) => {
     const get = (tipo) => (tipo in columnas ? (fila[columnas[tipo]] ?? '').trim() : '');
     const modelo = get('modelo');
     const talle = get('talle');
-    if (!modelo && !talle) return; // fila vacía
+    if (!modelo && !talle) return;
 
     const resPedida = aNumero(get('cantidadPedida'));
     const resDisp = aNumero(get('disponible'));
@@ -666,10 +637,9 @@ function parsearDatos(textoPegado) {
   }
 
   if (resultado.seReconstruyeronFilas) {
-    resultado.advertencias.unshift('El texto pegado no tenía saltos de línea entre filas (común al copiar desde un PDF o visor web); se reconstruyeron automáticamente. Revisá los datos antes de confiar en el resultado.');
+    resultado.advertencias.unshift('El texto pegado no tenía saltos de línea entre filas; se reconstruyeron automáticamente. Revisá los datos antes de confiar en el resultado.');
   }
 
-  // Cabecera: cliente / pedido / fecha más frecuentes (o primer valor no vacío)
   function valorMasFrecuente(campo) {
     const cuenta = {};
     registros.forEach(r => { if (r[campo]) cuenta[r[campo]] = (cuenta[r[campo]] || 0) + 1; });
@@ -681,8 +651,8 @@ function parsearDatos(textoPegado) {
   const infoPedido = valorMasFrecuente('numeroPedido');
   const infoFecha = valorMasFrecuente('fecha');
 
-  if (infoCliente.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoCliente.distintos} clientes distintos en los datos pegados; se muestran todos agregados.`);
-  if (infoPedido.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoPedido.distintos} números de pedido distintos; se muestran todos agregados.`);
+  if (infoCliente.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoCliente.distintos} clientes distintos en los datos pegados.`);
+  if (infoPedido.distintos > 1) resultado.advertencias.push(`Se detectaron ${infoPedido.distintos} números de pedido distintos.`);
 
   resultado.cabecera = {
     cliente: infoCliente.valor || '—',
@@ -690,7 +660,6 @@ function parsearDatos(textoPegado) {
     fecha: formatearFecha(infoFecha.valor) || '—'
   };
 
-  // Calcular estado por fila
   registros.forEach(r => {
     r.estado = calcularEstado(r.pedido, r.disponible);
   });
@@ -721,8 +690,6 @@ function calcularTotales(registros) {
 }
 
 // ===================== E. BÚSQUEDA / FILTRO =====================
-// Campos sobre los que se puede buscar, con su etiqueta visible en el
-// panel de filtros por campo.
 const CAMPOS_BUSCABLES = [
   { clave: 'cliente',      etiqueta: 'Cliente' },
   { clave: 'numeroPedido', etiqueta: 'N° Pedido' },
@@ -731,14 +698,8 @@ const CAMPOS_BUSCABLES = [
   { clave: 'fecha',        etiqueta: 'Fecha' }
 ];
 
-// Campos activos para la búsqueda (todos por defecto). Se guarda en una
-// variable global simple porque sólo hay un panel de búsqueda en la página.
 let camposActivos = new Set(CAMPOS_BUSCABLES.map(c => c.clave));
 
-// Convierte el texto pegado/escrito en el buscador en una lista de
-// términos individuales. Igual que con el pegado de Excel, el usuario
-// puede pegar muchos valores juntos (una columna de clientes, por
-// ejemplo): se separan por salto de línea, tab, coma o punto y coma.
 function partirTerminos(texto) {
   return String(texto || '')
     .split(/[\n\r\t,;]+/)
@@ -746,10 +707,6 @@ function partirTerminos(texto) {
     .filter(t => t !== '');
 }
 
-// Determina si un registro coincide con AL MENOS UNO de los términos
-// (en cualquiera de los campos activos). Cada término se compara de
-// forma normalizada (sin acentos, minúsculas) y por inclusión parcial,
-// para que "metropol" encuentre "LA NUEVA METROPOL S.A.".
 function registroCoincide(registro, terminosNormalizados) {
   if (terminosNormalizados.length === 0) return true;
   return terminosNormalizados.some(termino => {
@@ -769,14 +726,10 @@ function filtrarRegistros(registros, textoBusqueda) {
   return { filtrados, terminos };
 }
 
-// Resalta, dentro de un valor de celda ya escapado para HTML, las
-// coincidencias de los términos buscados. Se hace sobre el texto crudo
-// (antes de escapar) para no romper las entidades HTML.
 function resaltar(valor, terminosNormalizados) {
   const texto = String(valor ?? '');
   if (!texto || terminosNormalizados.length === 0) return escaparHTML(texto);
   const norm = normalizar(texto);
-  // Construir lista de rangos [inicio, fin) que matchean algún término
   let rangos = [];
   terminosNormalizados.forEach(t => {
     if (!t) return;
@@ -789,7 +742,6 @@ function resaltar(valor, terminosNormalizados) {
   });
   if (rangos.length === 0) return escaparHTML(texto);
   rangos.sort((a, b) => a[0] - b[0]);
-  // Fusionar rangos superpuestos
   const fusionados = [rangos[0]];
   for (let i = 1; i < rangos.length; i++) {
     const ultimo = fusionados[fusionados.length - 1];
@@ -808,7 +760,7 @@ function resaltar(valor, terminosNormalizados) {
 }
 
 // ===================== F. INTERFAZ =====================
-let ultimoResultado = null; // guarda el último resultado procesado para exportar
+let ultimoResultado = null;
 
 function escaparHTML(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -859,7 +811,7 @@ function renderizarTabla(registros, terminosNormalizados){
   if (!cont) return;
 
   if (registros.length === 0) {
-    cont.innerHTML = '<div class="sin-coincidencias">Ningún resultado coincide con la búsqueda. Probá con otro cliente, modelo o talle.</div>';
+    cont.innerHTML = '<div class="sin-coincidencias">Ningún resultado coincide con la búsqueda.</div>';
     return;
   }
 
@@ -907,14 +859,15 @@ function procesar(){
     out.innerHTML = `<div class="card-error"><b>No se pudo procesar</b>${escaparHTML(res.error.mensaje)}</div>`;
     ultimoResultado = null;
     btnExportar.disabled = true;
+    document.getElementById('btnCopiarExcel').disabled = true;
     panelBusqueda.style.display = 'none';
     return;
   }
 
   ultimoResultado = res;
   btnExportar.disabled = false;
+  document.getElementById('btnCopiarExcel').disabled = false;
 
-  // Reiniciar el buscador para el nuevo lote de datos
   document.getElementById('busqueda').value = '';
   camposActivos = new Set(CAMPOS_BUSCABLES.map(c => c.clave));
   construirFiltrosCampo();
@@ -945,6 +898,7 @@ function limpiarTodo(){
   document.getElementById('entrada').value = '';
   document.getElementById('salida').innerHTML = '<div class="vacio">Pegá datos y presioná «Procesar pedido» para ver el resultado.</div>';
   document.getElementById('btnExportar').disabled = true;
+  document.getElementById('btnCopiarExcel').disabled = true;
   document.getElementById('panelBusqueda').style.display = 'none';
   document.getElementById('busqueda').value = '';
   document.getElementById('chipsTerminos').innerHTML = '';
@@ -957,7 +911,6 @@ function exportarExcel(){
   if (!ultimoResultado) return;
   const res = ultimoResultado;
 
-  // Si hay una búsqueda activa, exportar lo filtrado en lugar de todo el pedido.
   const textoBusqueda = document.getElementById('busqueda') ? document.getElementById('busqueda').value : '';
   const { filtrados } = filtrarRegistros(res.registros, textoBusqueda);
   const registrosAExportar = filtrados.length ? filtrados : res.registros;
@@ -978,7 +931,6 @@ function exportarExcel(){
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, 'Pedido');
 
-  // Hoja de resumen
   const resumen = [
     { Campo: 'Cliente', Valor: res.cabecera.cliente },
     { Campo: 'Pedido', Valor: res.cabecera.numeroPedido },
@@ -999,6 +951,76 @@ function exportarExcel(){
   const nombreArchivo = `pedido_${nombreCliente}${nombrePedido ? '_' + nombrePedido : ''}${sufijoFiltro}.xlsx`;
 
   XLSX.writeFile(libro, nombreArchivo);
+}
+
+function copiarAlPortapapelesExcel() {
+  if (!ultimoResultado) return;
+  
+  const textoBusqueda = document.getElementById('busqueda') ? document.getElementById('busqueda').value : '';
+  const { filtrados } = filtrarRegistros(ultimoResultado.registros, textoBusqueda);
+  const registrosAExportar = filtrados.length ? filtrados : ultimoResultado.registros;
+
+  let htmlTable = `<table border="1" style="border-collapse:collapse; font-family:'Segoe UI',Arial,sans-serif; font-size:10.5pt;">
+    <thead>
+      <tr style="background-color:#1c2b2e; color:#ffffff; font-weight:bold; text-align:center;">
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Cliente</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Modelo</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Talle</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">N° Pedido</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Cant. pedida</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Disponible</th>
+        <th style="padding:6px 10px; border:1px solid #dcd6c8;">Estado</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  registrosAExportar.forEach(r => {
+    let colorEstado = '#777777';
+    let bgEstado = '#eeeeee';
+    if (r.estado.clave === 'completo') { colorEstado = '#2f7d5e'; bgEstado = '#e7f3ec'; }
+    else if (r.estado.clave === 'parcial') { colorEstado = '#b8862a'; bgEstado = '#faf0db'; }
+    else if (r.estado.clave === 'critico') { colorEstado = '#b3402f'; bgEstado = '#fbe9e4'; }
+
+    htmlTable += `<tr>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:left;">${escaparHTML(r.cliente || '—')}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:left;">${escaparHTML(r.modelo)}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${escaparHTML(r.talle)}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${r.numeroPedido ? escaparHTML(r.numeroPedido) : '—'}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${r.pedido}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center;">${r.disponible}</td>
+      <td style="padding:5px 8px; border:1px solid #dcd6c8; text-align:center; background-color:${bgEstado}; color:${colorEstado}; font-weight:bold;">${escaparHTML(r.estado.label)}</td>
+    </tr>`;
+  });
+
+  const totalPedido = registrosAExportar.reduce((s,r)=>s + (Number(r.pedido)||0), 0);
+  const totalDisponible = registrosAExportar.reduce((s,r)=>s + (Number(r.disponible)||0), 0);
+  
+  htmlTable += `<tr style="font-weight:bold; background-color:#f5f5f5;">
+    <td colspan="4" style="padding:6px 10px; border:1px solid #dcd6c8; text-align:left;">TOTALES</td>
+    <td style="padding:6px 10px; border:1px solid #dcd6c8; text-align:center;">${totalPedido}</td>
+    <td style="padding:6px 10px; border:1px solid #dcd6c8; text-align:center;">${totalDisponible}</td>
+    <td style="padding:6px 10px; border:1px solid #dcd6c8;"></td>
+  </tr>`;
+
+  htmlTable += `</tbody></table>`;
+
+  const blob = new Blob([htmlTable], { type: 'text/html' });
+  const data = [new ClipboardItem({ 'text/html': blob })];
+
+  navigator.clipboard.write(data).then(() => {
+    const btn = document.getElementById('btnCopiarExcel');
+    const originalText = btn.innerText;
+    btn.innerText = '¡Copiado!';
+    btn.style.background = '#e7f3ec';
+    btn.style.color = '#2f7d5e';
+    setTimeout(() => {
+      btn.innerText = originalText;
+      btn.style.background = 'var(--acento-suave)';
+      btn.style.color = 'var(--acento)';
+    }, 2000);
+  }).catch(err => {
+    alert('Error al copiar: ' + err);
+  });
 }
 
 // Estado inicial
